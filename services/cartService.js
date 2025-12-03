@@ -1,5 +1,6 @@
 import { client, jar } from "./wcClient.js";
 import {
+  store,
   setAgentSessionId,
   getCartForSession,
   setCartForSession,
@@ -39,37 +40,41 @@ async function createCartOrder(sessionId) {
 }
 
 async function addOrUpdateCartItem(sessionId, productId, quantity) {
-  // 1️⃣ Get existing order ID for this session
+  // 1️⃣ Get the current order ID for this session
   let orderId = getCartForSession(sessionId);
 
   // 2️⃣ If no order exists, create a new one
   if (!orderId) {
-    const created = await createCartOrder(sessionId);
-    orderId = created.id;
+    const res = await client.post("/orders", {
+      status: "pending",
+      billing: {},
+      shipping: {},
+      line_items: [],
+    });
+    orderId = res.data.id;
+    setCartForSession(sessionId, orderId);
   }
 
-  // 3️⃣ Fetch current order from WooCommerce
+  // 3️⃣ Fetch current order details
   const currentRes = await client.get(`/orders/${orderId}`);
   const currentOrder = currentRes.data;
+  const existingItems = currentOrder.line_items || [];
 
-  // 4️⃣ Find if the product already exists in the cart
-  const existing = currentOrder.line_items.find(
-    (li) => li.product_id === productId
-  );
+  // 4️⃣ Check if the product already exists in the cart
+  const existing = existingItems.find((li) => li.product_id === productId);
 
   let newLineItems;
-
   if (existing) {
-    // 5️⃣ Update quantity if product already exists
-    newLineItems = currentOrder.line_items.map((li) =>
+    // Update quantity for existing item
+    newLineItems = existingItems.map((li) =>
       li.product_id === productId
         ? { id: li.id, product_id: productId, quantity }
         : { id: li.id, product_id: li.product_id, quantity: li.quantity }
     );
   } else {
-    // 6️⃣ Add new product to the cart
+    // Add new item
     newLineItems = [
-      ...currentOrder.line_items.map((li) => ({
+      ...existingItems.map((li) => ({
         id: li.id,
         product_id: li.product_id,
         quantity: li.quantity,
@@ -78,28 +83,80 @@ async function addOrUpdateCartItem(sessionId, productId, quantity) {
     ];
   }
 
-  // 7️⃣ Update WooCommerce order with new line_items
+  // 5️⃣ Update the order in WooCommerce
   const updateRes = await client.put(`/orders/${orderId}`, {
     line_items: newLineItems,
   });
 
-  const updatedOrder = updateRes.data;
+  // 6️⃣ Store latest line_items in session for checkout
+  store.set(`cart_items_${sessionId}`, updateRes.data.line_items);
 
-  // 8️⃣ Store cart ID in session (important)
-  setCartForSession(sessionId, updatedOrder.id);
-
-  // 9️⃣ Store cart items in session for checkout
-  store.set(
-    `cart_items_${sessionId}`,
-    updatedOrder.line_items.map((li) => ({
-      id: li.id,
-      product_id: li.product_id,
-      quantity: li.quantity,
-    }))
-  );
-
-  return updatedOrder;
+  // 7️⃣ Return the updated order
+  return updateRes.data;
 }
+
+// async function addOrUpdateCartItem(sessionId, productId, quantity) {
+//   // 1️⃣ Get existing order ID for this session
+//   let orderId = getCartForSession(sessionId);
+
+//   // 2️⃣ If no order exists, create a new one
+//   if (!orderId) {
+//     const created = await createCartOrder(sessionId);
+//     orderId = created.id;
+//   }
+
+//   // 3️⃣ Fetch current order from WooCommerce
+//   const currentRes = await client.get(`/orders/${orderId}`);
+//   const currentOrder = currentRes.data;
+
+//   // 4️⃣ Find if the product already exists in the cart
+//   const existing = currentOrder.line_items.find(
+//     (li) => li.product_id === productId
+//   );
+
+//   let newLineItems;
+
+//   if (existing) {
+//     // 5️⃣ Update quantity if product already exists
+//     newLineItems = currentOrder.line_items.map((li) =>
+//       li.product_id === productId
+//         ? { id: li.id, product_id: productId, quantity }
+//         : { id: li.id, product_id: li.product_id, quantity: li.quantity }
+//     );
+//   } else {
+//     // 6️⃣ Add new product to the cart
+//     newLineItems = [
+//       ...currentOrder.line_items.map((li) => ({
+//         id: li.id,
+//         product_id: li.product_id,
+//         quantity: li.quantity,
+//       })),
+//       { product_id: productId, quantity },
+//     ];
+//   }
+
+//   // 7️⃣ Update WooCommerce order with new line_items
+//   const updateRes = await client.put(`/orders/${orderId}`, {
+//     line_items: newLineItems,
+//   });
+
+//   const updatedOrder = updateRes.data;
+
+//   // 8️⃣ Store cart ID in session (important)
+//   setCartForSession(sessionId, updatedOrder.id);
+
+//   // 9️⃣ Store cart items in session for checkout
+//   store.set(
+//     `cart_items_${sessionId}`,
+//     updatedOrder.line_items.map((li) => ({
+//       id: li.id,
+//       product_id: li.product_id,
+//       quantity: li.quantity,
+//     }))
+//   );
+
+//   return updatedOrder;
+// }
 
 // async function addOrUpdateCartItem(sessionId, productId, quantity) {
 //   let orderId = getCartForSession(sessionId);
