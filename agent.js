@@ -141,8 +141,6 @@ async function main() {
           client,
         });
 
-        await clearCartTool.invoke({ sessionId });
-
         console.log("\nLLM:\n" + checkoutResponse + "\n");
 
         checkoutStep = null;

@@ -1,102 +1,55 @@
-// import { tool } from "@langchain/core/tools";
-// import WooCommerceService from "../services/wooService.js";
-// import SessionService from "../services/sessionService.js";
-
-// export const checkoutTool = tool({
-//   name: "checkout",
-//   description:
-//     "Finalize a WooCommerce order using stored shipping/billing + cart items.",
-//   func: async ({ sessionId }) => {
-//     try {
-//       const woo = new WooCommerceService();
-//       const session = new SessionService();
-
-//       // Load saved data
-//       const billing = session.get(`billing_${sessionId}`);
-//       const shipping = session.get(`shipping_${sessionId}`);
-//       const orderId = session.get(`current_order_${sessionId}`);
-
-//       if (!orderId) {
-//         return "No active order found. Your cart seems empty.";
-//       }
-//       if (!billing || !shipping) {
-//         return "Missing billing or shipping details before checkout.";
-//       }
-
-//       // 1️⃣ Fetch the existing Woo order (cart)
-//       const order = await woo.getOrder(orderId);
-
-//       if (!order.line_items || order.line_items.length === 0) {
-//         return "Your cart is empty.";
-//       }
-
-//       // 2️⃣ Build minimal line_items for WooCommerce update
-//       const itemsForUpdate = order.line_items.map((li) => ({
-//         id: li.id, // WooCommerce requires line item ID when updating an existing order
-//         product_id: li.product_id,
-//         quantity: li.quantity,
-//       }));
-
-//       // 3️⃣ Update order → billing, shipping, status, line_items
-//       const updatedOrder = await woo.updateOrder(orderId, {
-//         billing,
-//         shipping,
-//         status: "completed",
-//         line_items: itemsForUpdate, // IMPORTANT: send minimal valid fields only
-//       });
-
-//       // 4️⃣ Clear session cart after successful checkout
-//       session.delete(`current_order_${sessionId}`);
-//       session.delete(`cart_items_${sessionId}`);
-
-//       return `✅ Order #${updatedOrder.id} has been placed successfully!`;
-//     } catch (err) {
-//       console.error("Checkout error:", err.response?.data || err.message);
-//       return "Checkout failed. " + (err.response?.data?.message || err.message);
-//     }
-//   },
-//   schema: {
-//     type: "object",
-//     properties: {
-//       sessionId: { type: "string" },
-//     },
-//     required: ["sessionId"],
-//   },
-// });
-
+// tools/checkout.js
 import { tool } from "langchain";
 import * as z from "zod";
+import { setCustomerId, setCartForSession } from "../utils/sessionStore.js";
 
 export const checkoutTool = tool(
   async ({ sessionId, sessionStore, client }) => {
     if (!sessionId) return "No active session.";
 
+    // read saved data
     const billing = sessionStore.get(`billing_${sessionId}`);
     const shipping = sessionStore.get(`shipping_${sessionId}`);
     const orderId = sessionStore.get(`cart_${sessionId}`);
-    const line_items = sessionStore.get(`cart_items_${sessionId}`); // <- USE THIS
 
     if (!billing) return "Please provide your billing details first.";
     if (!shipping) return "Please provide your shipping details first.";
-    if (!orderId || !line_items?.length) return "Your cart is empty.";
+    if (!orderId) return "Your cart is empty.";
 
-    const itemsForUpdate = line_items.map((li) => ({
-      id: li.id, // required if updating existing line item
-      product_id: li.product_id,
-      quantity: li.quantity,
-      // optionally variation_id or meta_data if needed
-    }));
+    // 1) fetch current order from WooCommerce to get line_item ids
+    const currentOrderRes = await client.get(`/orders/${orderId}`);
+    const currentOrder = currentOrderRes.data;
 
-    const updatedOrder = await client.put(`/orders/${orderId}`, {
+    // 2) prepare minimal line_items update array accepted by WooCommerce:
+    // use { id, quantity } for existing line items.
+    const line_items_update = (currentOrder.line_items || []).map((li) => {
+      // li.id is the line item id within the order (not product_id)
+      // If li.id exists, use it. Otherwise fallback to product_id + quantity.
+      if (li.id) {
+        return { id: li.id, quantity: li.quantity };
+      }
+      return { product_id: li.product_id, quantity: li.quantity };
+    });
+
+    // 3) update order: include billing, shipping, status and minimal line_items
+    const updatedRes = await client.put(`/orders/${orderId}`, {
       billing,
       shipping,
       status: "completed",
-      line_items: itemsForUpdate,
+      line_items: line_items_update,
     });
 
-    sessionStore.set(`customer_${sessionId}`, updatedOrder.data.customer_id);
+    const updatedOrder = updatedRes.data;
 
-    return `✅ Order #${updatedOrder.data.id} has been placed successfully!`;
+    // 4) set optional customer id in session and clear the cart mapping
+    if (updatedOrder.customer_id) {
+      setCustomerId(sessionId, updatedOrder.customer_id);
+    }
+
+    // remove the cart pointer so the session has no "pending cart"
+    setCartForSession(sessionId, null);
+
+    return `✅ Order #${updatedOrder.id} has been placed successfully!`;
   },
   {
     name: "checkout",
