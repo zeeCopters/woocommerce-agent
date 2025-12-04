@@ -27,17 +27,7 @@ import {
 import { store } from "./utils/sessionStore.js";
 import { client } from "./services/wcClient.js";
 
-import { OpenAI } from "langchain/llms/openai";
-import { createAgentExecutor } from "@langchain/core";
-import { askRAG } from "./services/ragChat.js";
-
 dotenv.config();
-
-const ragTool = {
-  name: "rag_tool",
-  description: "Ask questions from company documents",
-  func: async (input) => await askRAG(input),
-};
 
 // -----------------------------------------------------
 // LLM INIT
@@ -59,7 +49,6 @@ const tools = [
   shippingDetailsTool,
   billingDetailsTool,
   ordersTool,
-  ragTool,
 ];
 
 // -----------------------------------------------------
