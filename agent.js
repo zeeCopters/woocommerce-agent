@@ -14,6 +14,7 @@ import { checkoutTool } from "./tools/checkout.js";
 import { shippingDetailsTool } from "./tools/shippingDetails.js";
 import { billingDetailsTool } from "./tools/billingDetails.js";
 import { ordersTool } from "./tools/orders.js";
+import { ragTool } from "./tools/rag.js";
 
 import { ensureAgentSessionCookie } from "./services/cartService.js";
 
@@ -49,6 +50,7 @@ const tools = [
   shippingDetailsTool,
   billingDetailsTool,
   ordersTool,
+  ragTool,
 ];
 
 // -----------------------------------------------------
