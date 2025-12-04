@@ -14,6 +14,7 @@ import { checkoutTool } from "./tools/checkout.js";
 import { shippingDetailsTool } from "./tools/shippingDetails.js";
 import { billingDetailsTool } from "./tools/billingDetails.js";
 import { ordersTool } from "./tools/orders.js";
+import { documentSearchTool } from "./tools/rag.js";
 
 import { ensureAgentSessionCookie } from "./services/cartService.js";
 
@@ -26,6 +27,8 @@ import {
 
 import { store } from "./utils/sessionStore.js";
 import { client } from "./services/wcClient.js";
+
+// import { OpenAIEmbeddings } from "@langchain/openai";
 
 dotenv.config();
 
@@ -49,6 +52,7 @@ const tools = [
   shippingDetailsTool,
   billingDetailsTool,
   ordersTool,
+  documentSearchTool,
 ];
 
 // -----------------------------------------------------
@@ -287,6 +291,25 @@ function prettyOrders(orders) {
 }
 
 main();
+
+// async function testEmbeddings() {
+//   const embeddingModel = new OpenAIEmbeddings({
+//     modelName: "text-embedding-3-small",
+//     openAIApiKey: process.env.OPENAI_API_KEY,
+//   });
+
+//   try {
+//     const vector = await embeddingModel.embedQuery("test query");
+//     console.log(
+//       "Embeddings generated successfully. Vector length:",
+//       vector.length
+//     );
+//   } catch (error) {
+//     console.error("OpenAI Embedding Test Failed:", error);
+//   }
+// }
+
+// testEmbeddings();
 
 // Billing Details
 // Zeeshan, Ahmed, zeeshan@gmail.com, +923422884417, ABC Address, Karachi, Pakistan.
