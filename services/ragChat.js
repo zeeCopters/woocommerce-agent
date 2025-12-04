@@ -1,89 +1,74 @@
-// ragChat.js
+import { tool } from "@langchain/core/tools";
 import { Pinecone } from "@pinecone-database/pinecone";
+import { PineconeStore } from "@langchain/community/vectorstores/pinecone";
+import { OpenAIEmbeddings } from "@langchain/openai";
 import { ChatGroq } from "@langchain/groq";
 
-const model = new ChatGroq({
-  apiKey: process.env.GROQ_API_KEY,
-  model: "llama-3.1-70b-versatile",
-});
-
-// ---------------------------
-// ENV REQUIRED
-// ---------------------------
-// PINECONE_API_KEY
-// PINECONE_INDEX_NAME
-// PINECONE_NAMESPACE
-// GROQ_API_KEY
-// MODEL: "llama3-70b-8192" or "mixtral-8x7b" etc.
-
-const pinecone = new Pinecone({
+// Initialize Pinecone client
+const pc = new Pinecone({
   apiKey: process.env.PINECONE_API_KEY,
 });
 
-// ---------------------------
-// RAG CHAT FUNCTION
-// ---------------------------
+// Pinecone index + namespace
+const index = pc.Index(process.env.PINECONE_INDEX);
+const namespace = process.env.PINECONE_NAMESPACE || undefined;
 
-export async function ragChat(query) {
-  try {
-    const index = pinecone.index(process.env.PINECONE_INDEX_NAME);
+// LangChain embeddings
+const embeddings = new OpenAIEmbeddings({
+  model: "text-embedding-3-small",
+});
 
-    // 1️⃣ Search Pinecone
-    const searchResponse = await index.query({
-      namespace: process.env.PINECONE_NAMESPACE,
-      topK: 5,
-      includeMetadata: true,
-      vector: await embedText(query),
-    });
+// Convert Pinecone → Retriever
+const vectorStore = await PineconeStore.fromExistingIndex(embeddings, {
+  pineconeIndex: index,
+  namespace,
+});
 
-    const context = searchResponse.matches
-      .map((m) => m.metadata.text)
-      .join("\n\n");
+// LLM
+const llm = new ChatGroq({
+  apiKey: process.env.GROQ_API_KEY,
+  model: "llama3-70b-8192",
+  temperature: 0,
+});
 
-    // 2️⃣ Construct prompt
+// TOOL
+export const ragTool = tool(
+  async ({ query }) => {
+    if (!query) return "Missing query";
+
+    // Retrieve
+    const results = await vectorStore.similaritySearch(query, 4);
+    if (!results || results.length === 0) {
+      return "No relevant documents found.";
+    }
+
+    const context = results.map((r) => `• ${r.pageContent}`).join("\n\n");
+
+    // Ask LLM
     const prompt = `
-You are a helpful assistant. Use ONLY the context below to answer the user.
-If the answer is not in the context, say: "I don't have information about this."
+Use ONLY the following context to answer the question.
+If answer is not in context, say "I don't know".
 
---- CONTEXT START ---
+Context:
 ${context}
---- CONTEXT END ---
 
-QUESTION: ${query}
-ANSWER:
+Question: ${query}
+
+Answer:
 `;
 
-    // 3️⃣ LLM Response
-    const completion = await groq.chat.completions.create({
-      model: model,
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    });
-
-    return completion.choices[0].message.content;
-  } catch (err) {
-    console.error("RAG Chat Error:", err);
-    return "Error retrieving information from knowledge base.";
+    const response = await llm.invoke(prompt);
+    return response.content;
+  },
+  {
+    name: "rag_tool",
+    description: "RAG: answer from Pinecone vector DB",
+    schema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+      },
+      required: ["query"],
+    },
   }
-}
-
-// ---------------------------
-// EMBEDDING HELPER
-// ---------------------------
-
-async function embedText(text) {
-  try {
-    const response = await groq.embeddings.create({
-      model: "text-embedding-3-small",
-      input: text,
-    });
-
-    return response.data[0].embedding;
-  } catch (err) {
-    console.error("Embedding Error:", err);
-  }
-}
+);
