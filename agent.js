@@ -14,7 +14,6 @@ import { checkoutTool } from "./tools/checkout.js";
 import { shippingDetailsTool } from "./tools/shippingDetails.js";
 import { billingDetailsTool } from "./tools/billingDetails.js";
 import { ordersTool } from "./tools/orders.js";
-import { ragTool } from "./services/ragChat.js";
 
 import { ensureAgentSessionCookie } from "./services/cartService.js";
 
@@ -28,7 +27,17 @@ import {
 import { store } from "./utils/sessionStore.js";
 import { client } from "./services/wcClient.js";
 
+import { OpenAI } from "langchain/llms/openai";
+import { createAgentExecutor } from "@langchain/core";
+import { askRAG } from "./services/ragChat.js";
+
 dotenv.config();
+
+const ragTool = {
+  name: "rag_tool",
+  description: "Ask questions from company documents",
+  func: async (input) => await askRAG(input),
+};
 
 // -----------------------------------------------------
 // LLM INIT

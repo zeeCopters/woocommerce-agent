@@ -1,74 +1,43 @@
-import { tool } from "@langchain/core/tools";
-import { Pinecone } from "@pinecone-database/pinecone";
-import { PineconeStore } from "@langchain/community/vectorstores/pinecone";
-import { OpenAIEmbeddings } from "@langchain/openai";
-import { ChatGroq } from "@langchain/groq";
+// services/ragChat.js
+import { OpenAI } from "langchain/llms/openai";
+import { PineconeClient } from "@pinecone-database/pinecone";
+import { PineconeStore } from "langchain/vectorstores/pinecone";
+import { ConversationalRetrievalQAChain } from "langchain/chains";
 
 // Initialize Pinecone client
-const pc = new Pinecone({
+const pinecone = new PineconeClient();
+await pinecone.init({
   apiKey: process.env.PINECONE_API_KEY,
+  environment: process.env.PINECONE_ENV, // Make sure to add PINECONE_ENV in your .env
 });
 
-// Pinecone index + namespace
-const index = pc.Index(process.env.PINECONE_INDEX);
-const namespace = process.env.PINECONE_NAMESPACE || undefined;
+// Connect to existing Pinecone index
+const index = pinecone.Index(process.env.PINECONE_INDEX_NAME);
 
-// LangChain embeddings
-const embeddings = new OpenAIEmbeddings({
-  model: "text-embedding-3-small",
-});
-
-// Convert Pinecone → Retriever
-const vectorStore = await PineconeStore.fromExistingIndex(embeddings, {
-  pineconeIndex: index,
-  namespace,
-});
-
-// LLM
-const llm = new ChatGroq({
-  apiKey: process.env.GROQ_API_KEY,
-  model: "llama3-70b-8192",
-  temperature: 0,
-});
-
-// TOOL
-export const ragTool = tool(
-  async ({ query }) => {
-    if (!query) return "Missing query";
-
-    // Retrieve
-    const results = await vectorStore.similaritySearch(query, 4);
-    if (!results || results.length === 0) {
-      return "No relevant documents found.";
-    }
-
-    const context = results.map((r) => `• ${r.pageContent}`).join("\n\n");
-
-    // Ask LLM
-    const prompt = `
-Use ONLY the following context to answer the question.
-If answer is not in context, say "I don't know".
-
-Context:
-${context}
-
-Question: ${query}
-
-Answer:
-`;
-
-    const response = await llm.invoke(prompt);
-    return response.content;
-  },
+// Create vector store from existing Pinecone index
+const vectorStore = await PineconeStore.fromExistingIndex(
+  new OpenAI({ apiKey: process.env.OPENAI_API_KEY }),
   {
-    name: "rag_tool",
-    description: "RAG: answer from Pinecone vector DB",
-    schema: {
-      type: "object",
-      properties: {
-        query: { type: "string" },
-      },
-      required: ["query"],
-    },
+    pineconeIndex: index,
+    namespace: process.env.PINECONE_NAMESPACE,
   }
 );
+
+// Initialize Conversational Retrieval QA Chain
+const chain = ConversationalRetrievalQAChain.fromLLM(
+  new OpenAI({ apiKey: process.env.OPENAI_API_KEY, temperature: 0 }),
+  vectorStore.asRetriever()
+);
+
+/**
+ * Ask question to RAG system
+ * @param {string} question
+ * @param {Array} chatHistory
+ */
+export async function askRAG(question, chatHistory = []) {
+  const res = await chain.call({
+    question,
+    chat_history: chatHistory,
+  });
+  return res.text;
+}
